@@ -1,14 +1,20 @@
 package org.UniMock;
 import static spark.Spark.*;
+
+import org.slf4j.LoggerFactory;
 import spark.Request;
 import spark.Response;
 import java.util.HashMap;
 import java.util.Map;
+
+
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 public class SparkAppMain {
+    private static final org. slf4j.Logger log = LoggerFactory.getLogger(SparkAppMain.class);
     public static void main(String[] args) {
-        AppLogic.preLaunch(args);
+        String pl = AppLogic.preLaunch(args);
+        log.info("========"+ pl);
 
         port(AppLogic.PORT);
         threadPool(AppLogic.THREAD_MAX, AppLogic.THREAD_MIN, AppLogic.THREAD_IDLE_TIMEOUT);
@@ -37,7 +43,6 @@ public class SparkAppMain {
             String endpoint = req.uri();
             String body = req.body() != null ? req.body() : "";
 
-            // --- Собираем переменные из запроса ---
             Map<String, String> reqVars = new HashMap<>();
             reqVars.put("body", body);
 
@@ -53,10 +58,11 @@ public class SparkAppMain {
                 reqVarsHeaders.put(h, req.headers(h));
             }
 
-            // --- Генерируем ответ ---
-            ResponseData rd = AppLogic.buildResponse(method, endpoint, reqVars, reqVarsHeaders, reqVarsParams);
+            // path-переменные (если эндпоинт в шаблоне содержит :var)
+            Map<String, String> reqPathVars = AppLogic.extractPathVars(method, endpoint);
 
-            // --- Устанавливаем ответ ---
+            ResponseData rd = AppLogic.buildResponse(method, endpoint, reqVars, reqVarsHeaders, reqVarsParams, reqPathVars);
+
             res.status(rd.status);
             res.type("application/json; charset=utf-8");
             rd.headers.forEach(res::header);

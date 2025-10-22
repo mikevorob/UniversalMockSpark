@@ -1,0 +1,6 @@
+GET /hello
+Vars:
+name: reqParam; name
+agent: reqHeader; User-Agent
+Success body:
+Hello, $name$! You are using $agent$.

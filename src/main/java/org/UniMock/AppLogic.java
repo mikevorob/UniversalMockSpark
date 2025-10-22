@@ -1,10 +1,15 @@
 package org.UniMock;
 import org.apache.commons.text.StringSubstitutor;
+import org.slf4j.LoggerFactory;
+
 import java.io.*;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class AppLogic {
 
@@ -17,17 +22,34 @@ public class AppLogic {
 
     private static final Random random = new Random();
     private static final Map<String, Template> templateCache = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Template> endpointCache = new ConcurrentHashMap<>();
+    private static final org. slf4j.Logger log = LoggerFactory.getLogger(AppLogic.class);
+
 
     public static String preLaunch(String[] args) {
         String configPath = "config.properties";
+        String logLevel = System.getProperty("log_level");
         if (args != null) {
             for (String arg : args) {
                 if (arg.startsWith("config=")) {
                     configPath = arg.substring("config=".length());
-                    break;
+                } else if (arg.startsWith("log_level=") && logLevel == null) {
+                    // ← если log_level не задан через -D, читаем из аргумента
+                    logLevel = arg.substring("log_level=".length());
                 }
             }
         }
+
+// ← если ничего не указано, ставим WARN
+        if (logLevel == null || logLevel.isBlank()) {
+            logLevel = "WARN";
+        }
+
+// ← пробрасываем log_level в системное свойство, чтобы logback его увидел
+        System.setProperty("log_level", logLevel);
+
+        System.out.println("Config file: " + configPath);
+        System.out.println("Log level set to: " + logLevel);
 
         Properties props = new Properties();
         File configFile = new File(configPath);
@@ -85,67 +107,141 @@ public class AppLogic {
         t.method = first[0].trim();
         t.endpoint = first[1].trim();
 
-        String section = "";
-        StringBuilder bodyBuffer = new StringBuilder();
+        Map<String, List<String>> sections = new LinkedHashMap<>();
+        String currentSection = "default";
+
+        // Список известных секций + флаг "уже начата"
+        Map<String, Boolean> KNOWN_SECTIONS = new LinkedHashMap<>();
+        KNOWN_SECTIONS.put("Additional Headers", false);
+        KNOWN_SECTIONS.put("Vars", false);
+        KNOWN_SECTIONS.put("Error Config", false);
+        KNOWN_SECTIONS.put("Error body", false);
+        KNOWN_SECTIONS.put("Success body", false);
 
         for (int i = 1; i < lines.length; i++) {
             String line = lines[i].trim();
             if (line.isEmpty()) continue;
 
-            if (line.endsWith(":") && !line.startsWith("Error body") && !line.startsWith("Success body")) {
-                section = line.replace(":", "").trim();
-                continue;
+            if (line.endsWith(":")) {
+                String candidate = line.substring(0, line.length() - 1).trim();
+                // Проверяем, что это известная секция и она ещё не начиналась
+                if (KNOWN_SECTIONS.containsKey(candidate) && !KNOWN_SECTIONS.get(candidate)) {
+                    currentSection = candidate;
+                    KNOWN_SECTIONS.put(candidate, true); // флаг "секция началась"
+                    sections.putIfAbsent(currentSection, new ArrayList<>());
+                    continue;
+                }
             }
+
+            sections.computeIfAbsent(currentSection, k -> new ArrayList<>()).add(line);
+        }
+
+        // --- Обработка секций ---
+        for (Map.Entry<String, List<String>> entry : sections.entrySet()) {
+            String section = entry.getKey();
+            List<String> body = entry.getValue();
 
             switch (section) {
                 case "Additional Headers":
-                    if (line.contains(":")) {
-                        String[] p = line.split(":", 2);
-                        HeaderDef h = new HeaderDef();
-                        h.name = p[0].trim();
-                        String[] parts = p[1].split(";", 2);
-                        h.type = parts[0].trim();
-                        h.condition = parts.length > 1 ? parts[1].trim() : "";
-                        t.headers.put(h.name, h);
+                    for (String line : body) {
+                        if (line.contains(":")) {
+                            String[] p = line.split(":", 2);
+                            HeaderDef h = new HeaderDef();
+                            h.name = p[0].trim();
+                            String[] parts = p[1].split(";", 2);
+                            h.type = parts[0].trim();
+                            h.condition = parts.length > 1 ? parts[1].trim() : "";
+                            t.headers.put(h.name, h);
+                        }
                     }
                     break;
-                case "Body vars":
-                    if (line.contains(":")) {
-                        String[] p = line.split(":", 2);
-                        VarDef v = new VarDef();
-                        v.name = p[0].trim();
-                        String[] parts = p[1].split(";", 2);
-                        v.type = parts[0].trim();
-                        v.condition = parts.length > 1 ? parts[1].trim() : "";
-                        t.bodyVars.put(v.name, v);
+
+                case "Vars":
+                    for (String line : body) {
+                        if (line.contains(":")) {
+                            String[] p = line.split(":", 2);
+                            VarDef v = new VarDef();
+                            v.name = p[0].trim();
+                            String[] parts = p[1].split(";", 2);
+                            v.type = parts[0].trim();
+                            v.condition = parts.length > 1 ? parts[1].trim() : "";
+                            t.bodyVars.put(v.name, v);
+                        }
                     }
                     break;
+
+                case "Error Config":
+                    for (String line : body) {
+                        if (line.startsWith("Percent:"))
+                            t.errorPercent = Integer.parseInt(line.replace("Percent:", "").replace("%", "").trim());
+                        else if (line.startsWith("Status:"))
+                            t.errorStatus = Integer.parseInt(line.replace("Status:", "").trim());
+                    }
+                    break;
+
+                case "Error body":
+                    t.errorBody = String.join("\n", body).trim();
+                    break;
+
+                case "Success body":
+                    t.successBody = String.join("\n", body).trim();
+                    break;
+
                 default:
-                    if (line.startsWith("Error percent:"))
-                        t.errorPercent = Integer.parseInt(line.replace("Error percent:", "").replace("%", "").trim());
-                    else if (line.startsWith("Error Status:"))
-                        t.errorStatus = Integer.parseInt(line.replace("Error Status:", "").trim());
-                    else if (line.startsWith("Error body:")) {
-                        section = "Error body";
-                        bodyBuffer = new StringBuilder();
-                    } else if (line.startsWith("Success body:")) {
-                        if (section.equals("Error body"))
-                            t.errorBody = bodyBuffer.toString().trim();
-                        section = "Success body";
-                        bodyBuffer = new StringBuilder();
-                    } else if (section.equals("Error body") || section.equals("Success body"))
-                        bodyBuffer.append(line).append("\n");
+                    // Игнорируем неизвестные секции
                     break;
             }
         }
 
-        if (section.equals("Error body")) t.errorBody = bodyBuffer.toString().trim();
-        else if (section.equals("Success body")) t.successBody = bodyBuffer.toString().trim();
         return t;
     }
 
     public static Template getTemplate(String method, String endpoint) {
-        return templateCache.get(method.toUpperCase() + " " + endpoint);
+        String key = method + " " + endpoint;
+
+        // 1. Проверяем быстрый кэш соответствий
+        Template cached = endpointCache.get(key);
+        if (cached != null) return cached;
+
+        // 2. Пробуем точное совпадение
+        Template exact = templateCache.get(key);
+        if (exact != null) {
+            endpointCache.put(key, exact);
+            return exact;
+        }
+
+        // 3. Ищем подходящий шаблон по паттернам
+        Template matched = findMatchingTemplate(method, endpoint);
+        if (matched != null) {
+            endpointCache.put(key, matched);
+        }
+        return matched;
+    }
+
+    private static Template findMatchingTemplate(String method, String requestUri) {
+        for (Map.Entry<String, Template> entry : templateCache.entrySet()) {
+            String key = entry.getKey();
+            String[] parts = key.split(" ", 2);
+            if (parts.length != 2) continue;
+            String m = parts[0];
+            String pattern = parts[1];
+
+            if (!m.equalsIgnoreCase(method)) continue;
+
+            // Преобразуем шаблон в regex: :var → ([^/]+), * → .*
+            String regex = Pattern.quote(pattern)
+                    .replace("\\*", ".*")
+                    .replaceAll(":(\\w+)", "([^/]+)")
+                    .replace("\\?", "\\?");
+
+            Pattern compiled = Pattern.compile("^" + regex + "$");
+            Matcher matcher = compiled.matcher(requestUri);
+
+            if (matcher.matches()) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     private static String processTemplate(String template, Map<String,String> vars) {
@@ -157,7 +253,8 @@ public class AppLogic {
             String endpoint,
             Map<String,String> reqVars,
             Map<String,String> reqHeaders,
-            Map<String,String> reqParams) {
+            Map<String,String> reqParams,
+            Map<String,String> reqPathVars) {
 
         Template t = getTemplate(method, endpoint);
         if (t == null)
@@ -172,7 +269,8 @@ public class AppLogic {
                     reqVars.getOrDefault("body", ""),
                     v.condition,
                     reqHeaders,
-                    reqParams
+                    reqParams,
+                    reqPathVars
             );
             finalVars.put(v.name, val);
         }
@@ -190,5 +288,24 @@ public class AppLogic {
         t.headers.forEach((k,h) -> headers.put(k, "auto"));
 
         return new ResponseData(status, body, headers);
+    }
+
+    public static Map<String, String> extractPathVars(String method, String requestUri) {
+        Map<String, String> vars = new HashMap<>();
+
+        // ищем шаблон, соответствующий методу и endpoint'у
+        Template t = findMatchingTemplate(method, requestUri);
+        if (t == null) return vars;
+
+        String[] templateParts = t.endpoint.split("/");
+        String[] requestParts = requestUri.split("/");
+
+        for (int i = 0; i < Math.min(templateParts.length, requestParts.length); i++) {
+            String tp = templateParts[i];
+            if (tp.startsWith(":")) {
+                vars.put(tp.substring(1), requestParts[i]);
+            }
+        }
+        return vars;
     }
 }

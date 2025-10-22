@@ -24,7 +24,8 @@ public class VarsGenerator {
                                   String body,
                                   String condition,
                                   Map<String,String> reqHeaders,
-                                  Map<String,String> reqParams) {
+                                  Map<String,String> reqParams,
+                                  Map<String,String> reqPathVars) {
         if (type == null) return "";
         type = type.trim();
         try {
@@ -37,6 +38,7 @@ public class VarsGenerator {
                 case "fixed": return fixed(condition);
                 case "reqHeader": return reqHeader(reqHeaders, condition);
                 case "reqParam": return reqParam(reqParams, condition);
+                case "reqPath": return reqPath(reqPathVars, condition);
                 default:
                     System.out.println("⚠️ Unknown variable type: " + type);
                     return "";
@@ -141,6 +143,10 @@ public class VarsGenerator {
     public static String reqParam(Map<String,String> params, String paramName) {
         if (params == null || paramName == null) return "";
         return params.getOrDefault(paramName, "");
+    }
+    public static String reqPath(Map<String,String> pathVars, String varName) {
+        if (pathVars == null || varName == null) return "";
+        return pathVars.getOrDefault(varName, "");
     }
 }
 
