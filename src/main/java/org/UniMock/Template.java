@@ -10,6 +10,7 @@ public class Template {
     public int errorStatus = 500;
     public String errorBody = null;
     public String successBody = "";
+    public long responseTimeMs = -1;
 }
 
 class VarDef {

@@ -20,7 +20,7 @@ public class SparkAppMain {
         }
         String pl = AppLogic.preLaunch(args);
         System.out.println("Log level set to: " + System.getProperty("log_level"));
-        logger.info("========"+ pl);
+        logger.info(pl);
 
 
         port(AppLogic.PORT);

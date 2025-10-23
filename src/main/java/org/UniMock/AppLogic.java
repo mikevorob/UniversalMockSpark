@@ -23,6 +23,7 @@ public class AppLogic {
     private static final Random random = new Random();
     private static final Map<String, Template> templateCache = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Template> endpointCache = new ConcurrentHashMap<>();
+    private static final org. slf4j.Logger logger = LoggerFactory.getLogger(AppLogic.class);
 
 
 
@@ -108,6 +109,7 @@ public class AppLogic {
         KNOWN_SECTIONS.put("Error Config", false);
         KNOWN_SECTIONS.put("Error body", false);
         KNOWN_SECTIONS.put("Success body", false);
+        KNOWN_SECTIONS.put("Response time", false);
 
         for (int i = 1; i < lines.length; i++) {
             String line = lines[i].trim();
@@ -178,6 +180,37 @@ public class AppLogic {
                     t.successBody = String.join("\n", body).trim();
                     break;
 
+                case "Response time":
+                    if (body != null && !body.isEmpty()) {
+                        // Берём первую непустую строку секции и парсим её как long
+                        String candidate = null;
+                        for (String s : body) {
+                            if (s != null && !s.trim().isEmpty()) {
+                                candidate = s.trim();
+                                break;
+                            }
+                        }
+                        if (candidate != null) {
+                            try {
+                                long val = Long.parseLong(candidate);
+                                if (val >= 0) {
+                                    t.responseTimeMs = val;
+                                } else {
+                                    // отрицательное значение не имеет смысла — игнорируем
+                                    logger.warn("Invalid Response Time (negative) in template '{}': {}", t.endpoint, candidate);
+                                }
+                            } catch (NumberFormatException ex) {
+                                logger.warn("Invalid Response Time value in template '{}': {}", t.endpoint, candidate);
+                            }
+                        } else {
+                            // секция пуста — оставляем значение по умолчанию (-1)
+                            logger.debug("Response Time section is empty in template '{}'", t.endpoint);
+                        }
+                    } else {
+                        // секция отсутствует/пустая — ничего не делаем
+                    }
+                    break;
+
                 default:
                     // Игнорируем неизвестные секции
                     break;
@@ -246,6 +279,7 @@ public class AppLogic {
             Map<String,String> reqHeaders,
             Map<String,String> reqParams,
             Map<String,String> reqPathVars) {
+        long start = System.currentTimeMillis();
 
         Template t = getTemplate(method, endpoint);
         if (t == null)
@@ -277,6 +311,17 @@ public class AppLogic {
         // Генерация заголовков ответа
         Map<String,String> headers = new HashMap<>();
         t.headers.forEach((k,h) -> headers.put(k, "auto"));
+        long elapsed = System.currentTimeMillis() - start;
+        long delay = t.responseTimeMs - elapsed;
+
+        if (delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException ignored) {}
+        } else if (t.responseTimeMs > 0) {
+            logger.warn("Response time exceeded: expected {}ms, actual {}ms for {} {}",
+                    t.responseTimeMs, elapsed, method, endpoint);
+        }
 
         return new ResponseData(status, body, headers);
     }
