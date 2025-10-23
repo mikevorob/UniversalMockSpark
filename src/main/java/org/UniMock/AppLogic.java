@@ -23,33 +23,24 @@ public class AppLogic {
     private static final Random random = new Random();
     private static final Map<String, Template> templateCache = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Template> endpointCache = new ConcurrentHashMap<>();
-    private static final org. slf4j.Logger log = LoggerFactory.getLogger(AppLogic.class);
+
 
 
     public static String preLaunch(String[] args) {
         String configPath = "config.properties";
-        String logLevel = System.getProperty("log_level");
         if (args != null) {
             for (String arg : args) {
                 if (arg.startsWith("config=")) {
                     configPath = arg.substring("config=".length());
-                } else if (arg.startsWith("log_level=") && logLevel == null) {
-                    // ← если log_level не задан через -D, читаем из аргумента
-                    logLevel = arg.substring("log_level=".length());
                 }
             }
         }
-
 // ← если ничего не указано, ставим WARN
-        if (logLevel == null || logLevel.isBlank()) {
-            logLevel = "WARN";
-        }
 
-// ← пробрасываем log_level в системное свойство, чтобы logback его увидел
-        System.setProperty("log_level", logLevel);
 
         System.out.println("Config file: " + configPath);
-        System.out.println("Log level set to: " + logLevel);
+        System.out.println("Log level set to: " + System.getProperty("log_level"));
+
 
         Properties props = new Properties();
         File configFile = new File(configPath);
@@ -309,3 +300,5 @@ public class AppLogic {
         return vars;
     }
 }
+
+

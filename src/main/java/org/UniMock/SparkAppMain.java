@@ -4,6 +4,8 @@ import static spark.Spark.*;
 import org.slf4j.LoggerFactory;
 import spark.Request;
 import spark.Response;
+import spark.Spark;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -11,13 +13,21 @@ import java.util.Map;
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 public class SparkAppMain {
-    private static final org. slf4j.Logger log = LoggerFactory.getLogger(SparkAppMain.class);
+    private static final org. slf4j.Logger logger = LoggerFactory.getLogger(SparkAppMain.class);
     public static void main(String[] args) {
+        if (!org.slf4j.LoggerFactory.getILoggerFactory().getClass().getName().contains("ch.qos.logback")) {
+            System.err.println("⚠️ Logback not active! Check dependencies and logback.xml");
+        }
         String pl = AppLogic.preLaunch(args);
-        log.info("========"+ pl);
+        System.out.println("Log level set to: " + System.getProperty("log_level"));
+        logger.info("========"+ pl);
+
 
         port(AppLogic.PORT);
         threadPool(AppLogic.THREAD_MAX, AppLogic.THREAD_MIN, AppLogic.THREAD_IDLE_TIMEOUT);
+        Spark.before(((request, response) -> {
+            logger.info("Request: " + request.requestMethod() + " " +request.pathInfo() +" " + request.params());
+        }));
 
         get("/", SparkAppMain::handleAll);
         get("/*", SparkAppMain::handleAll);
@@ -36,6 +46,8 @@ public class SparkAppMain {
 
         System.out.println("🚀 SparkApp is running on port " + AppLogic.PORT);
     }
+
+
 
     private static Object handleAll(Request req, Response res) {
         try {
